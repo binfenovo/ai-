@@ -37,6 +37,16 @@ def call_openai_chat(system: str, user: str, model: str = DEFAULT_MODEL, tempera
     return resp.choices[0].message.content
 
 
+def _slugify_name(name: str) -> str:
+    # simple slug for model_id generation: keep alphanumerics and underscores
+    import re
+    s = name.strip().lower()
+    s = re.sub(r"[^0-9a-z]+", "_", s)
+    s = re.sub(r"_+", "_", s)
+    s = s.strip("_")
+    return s or "char"
+
+
 @app.post("/understand", response_model=UnderstandResponse)
 async def understand(req: UnderstandRequest):
     text = req.text
@@ -61,15 +71,28 @@ async def understand(req: UnderstandRequest):
         else:
             raise HTTPException(status_code=500, detail=f"LLM output not valid JSON and no JSON substring found. Raw:\n{raw}")
     try:
-        # if main_characters include model_id, build character_models mapping
+        # build character_models mapping; if model_id provided in main_characters use it, otherwise create a placeholder
         char_models = {}
         for c in parsed.get('main_characters', []):
+            name = c.get('name') if isinstance(c, dict) else None
+            if not name:
+                continue
             if isinstance(c, dict) and c.get('model_id'):
-                char_models[c.get('name')] = {
+                char_models[name] = {
                     'model_id': c.get('model_id'),
                     'asset_reference': None,
                     'version': None,
                     'notes': 'inferred from main_characters.model_id'
+                }
+            else:
+                # generate placeholder model_id like m_{name}_v1
+                slug = _slugify_name(name)
+                placeholder_id = f"m_{slug}_v1"
+                char_models[name] = {
+                    'model_id': placeholder_id,
+                    'asset_reference': None,
+                    'version': 'v1',
+                    'notes': 'placeholder generated (user allowed placeholders)'
                 }
         if char_models:
             parsed['character_models'] = char_models
